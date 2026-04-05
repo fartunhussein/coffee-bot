@@ -11,6 +11,10 @@ const commands = [
     .setDescription('Leave the coffee chat'),
 
   new SlashCommandBuilder()
+  .setName('count')
+  .setDescription('See how many participants are in the coffee chat'),
+
+  new SlashCommandBuilder()
     .setName('pair')
     .setDescription('You will be paired in this month'),
 

@@ -68,6 +68,16 @@ if (interaction.commandName === 'pair') {
 
     await interaction.editReply('👋 You left the coffee chat.');
   }
+
+  if (interaction.commandName === 'count') {
+    await interaction.deferReply({ flags: 64 });
+
+    const result = await pool.query('SELECT COUNT(*) FROM participants');
+    const count = result.rows[0].count;
+
+    await interaction.editReply(`☕ There are currently ${count} participants in this coffee chat channel.`);
+  }
+
 });
 
 
