@@ -10,15 +10,11 @@ export async function runPairing(client, channel) {
      FROM pairings
      WHERE month >= TO_CHAR(NOW() - INTERVAL '3 months', 'YYYY-MM')`
   );
-
-  const recentPairs = new Set();
-  for (const row of historyResult.rows) {
-    recentPairs.add(makeKey(row.user1_id, row.user2_id));
-  }
+  const recentPairs = new Set(historyResult.rows.map(r => makeKey(r.user1_id, r.user2_id)));
 
   // Get participants
   const result = await pool.query('SELECT user_id FROM participants');
-  const participants = result.rows.map(row => row.user_id);
+  const participants = result.rows.map(r => r.user_id);
 
   if (participants.length < 2) {
     await channel.send(
@@ -35,79 +31,59 @@ export async function runPairing(client, channel) {
     [participants[i], participants[j]] = [participants[j], participants[i]];
   }
 
-  const used = new Set();
+  const used = new Set(); // Track paired users
+  let leftover = null;
+
+  // Handle odd number of participants
+  if (participants.length % 2 !== 0) {
+    leftover = participants.pop();
+  }
 
   for (let i = 0; i < participants.length; i++) {
     const user1 = participants[i];
-    if (used.has(user1)) continue;
+    if (used.has(user1)) continue; //  skip already paired
+ 
+    // Try to find a partner not recently paired
+    let partner = participants.slice(i + 1).find(u => !used.has(u) && !recentPairs.has(makeKey(user1, u)));
 
-    let partner1 = null;
-    let partner2 = null;
-
-    // Find first partner not recently paired
-    for (let j = i + 1; j < participants.length; j++) {
-      const user2 = participants[j];
-      if (used.has(user2)) continue;
-
-      if (!recentPairs.has(makeKey(user1, user2))) {
-        partner1 = user2;
-        break;
-      }
+    // Fallback: any unused participant
+    if (!partner) {
+      partner = participants.slice(i + 1).find(u => !used.has(u));
     }
 
-    // Fallback: allow repeat if no fresh match
-    if (!partner1) {
-      for (let j = i + 1; j < participants.length; j++) {
-        const user2 = participants[j];
-        if (!used.has(user2)) {
-          partner1 = user2;
-          break;
-        }
-      }
-    }
-
-    if (!partner1) {
-      // Only one left, no partners
-      try {
-        const userObj = await client.users.fetch(user1);
-        await userObj.send(`👀 You have no partner this month. Try again next month!`);
-      } catch {
-        await channel.send(`⚠️ Could not DM <@${user1}>`);
-      }
-      continue;
-    }
+    if (!partner) continue; // No available partner, skip this participant (shouldn't happen)
 
     used.add(user1);
-    used.add(partner1);
+    used.add(partner);
 
-    // Check for third participant to make a triple
-    if (participants.length - used.size === 1) {
-      // Only one participant left, make a triple
-      for (let k = i + 1; k < participants.length; k++) {
-        const user3 = participants[k];
-        if (!used.has(user3)) {
-          partner2 = user3;
-          used.add(partner2);
-          break;
-        }
-      }
+    // Form group
+    const group = [user1, partner];
+
+    // If leftover exists and this is the last pair, add to make a triple
+    if (leftover && participants.length === used.size) {
+      group.push(leftover);
+      leftover = null;
     }
 
-    const group = [user1, partner1];
-    if (partner2) group.push(partner2);
+    // DM each member
+   for (const u of group) {
+  try {
+    const userObj = await client.users.fetch(u); // Fetch recipient
 
-    // DM everyone in the group
-    for (const u of group) {
-      try {
-        const others = group.filter(x => x !== u).map(x => `<@${x}>`).join(', ');
-        const userObj = await client.users.fetch(u);
-        await userObj.send(`☕ You’ve been paired with ${others}! Have a great chat 👋`);
-      } catch {
-        await channel.send(`⚠️ Could not DM <@${u}>`);
-      }
-    }
+    // Get mentions for everyone else in the group
+    const others = group
+      .filter(x => x !== u)
+      .map(x => `<@${x}>`) 
+      .join(', ');
 
-    // Save pairs to DB (only save as pairwise, not triples)
+    await userObj.send(`☕ You’ve been paired with ${others}! Have a great chat 👋`);
+  } catch (err) {
+    console.error(`Failed to DM user ${u}:`, err);
+    await channel.send(`⚠️ Could not DM <@${u}>`);
+  }
+}
+
+    // Save pairings to DB
     for (let x = 0; x < group.length; x++) {
       for (let y = x + 1; y < group.length; y++) {
         await pool.query(
