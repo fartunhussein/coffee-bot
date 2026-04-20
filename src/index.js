@@ -13,7 +13,7 @@ const client = new Client({ intents: [
  client.once('clientReady', () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
-  cron.schedule('*/1 * * * *', async () => {
+  cron.schedule('*/10 * * * *', async () => {
     const channel = await client.channels.fetch(process.env.CHANNEL_ID);
     console.log('Running monthly pairing...');
     await runPairing(client, channel);
